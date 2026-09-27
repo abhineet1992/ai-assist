@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Screen Copilot — whatever is visible goes into context</title>
+<style>
+  :root {
+    --bg:#0b0d12; --surface:#12151c; --surface-2:#171b24; --surface-3:#1e2430;
+    --border:#262c3a; --border-soft:#1d2330; --text:#e6e9f0; --text-dim:#9aa3b2; --text-faint:#6b7382;
+    --accent:#7c6cff; --accent-2:#5a4ce0; --green:#35c46b; --red:#ff5b64; --amber:#f5b544; --blue:#4c9dff;
+    --code-bg:#0d1017;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;font-family:var(--font);color:var(--text);-webkit-font-smoothing:antialiased;
+    background:radial-gradient(1200px 700px at 15% -10%,#1a1830 0%,transparent 55%),
+               radial-gradient(900px 600px at 110% 20%,#10202a 0%,transparent 50%),#06070a;}
+  body{display:flex;align-items:center;justify-content:center;padding:24px;}
+  .window{width:1180px;height:750px;max-width:100%;max-height:92vh;background:var(--bg);
+    border:1px solid var(--border);border-radius:16px;box-shadow:0 40px 120px rgba(0,0,0,.6);
+    display:flex;flex-direction:column;overflow:hidden;}
+
+  .titlebar{height:40px;flex:0 0 40px;display:flex;align-items:center;gap:12px;padding:0 14px;
+    background:linear-gradient(#12141b,#0e1016);border-bottom:1px solid var(--border-soft);user-select:none;}
+  .traffic{display:flex;gap:8px;} .dot{width:12px;height:12px;border-radius:50%;}
+  .dot.r{background:#ff5f57}.dot.y{background:#febc2e}.dot.g{background:#28c840}
+  .app-name{font-size:12.5px;color:var(--text-dim);margin-left:4px;}.app-name b{color:var(--text);}
+  .spacer{flex:1;}
+  .cap-pill{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;padding:5px 10px;
+    border-radius:20px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-dim);cursor:pointer;transition:.15s;}
+  .cap-pill:hover{border-color:#333c4e;}
+  .cap-pill.live{color:#fff;border-color:transparent;background:linear-gradient(#e0424a,#c8353d);box-shadow:0 0 0 3px rgba(255,91,100,.12);}
+  .cap-pill .rec{width:8px;height:8px;border-radius:50%;background:currentColor;}
+  .cap-pill.live .rec{animation:pulse 1.3s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+  .ic-btn{width:30px;height:30px;border-radius:8px;border:1px solid transparent;background:none;color:var(--text-dim);
+    cursor:pointer;display:grid;place-items:center;transition:.15s;}
+  .ic-btn:hover{background:var(--surface-2);color:var(--text);border-color:var(--border);}
+  .ic-btn svg{width:17px;height:17px;}
+
+  .body{flex:1;display:flex;min-height:0;}
+
+  /* LEFT stage */
+  .stage{flex:1;min-width:0;display:flex;flex-direction:column;background:#070810;}
+  .stage-bar{height:46px;flex:0 0 46px;display:flex;align-items:center;gap:10px;padding:0 14px;
+    border-bottom:1px solid var(--border-soft);background:var(--surface);}
+  .picker{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--text);
+    background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;cursor:pointer;position:relative;}
+  .picker svg.ic{width:14px;height:14px;color:var(--text-dim);} .picker .chev{color:var(--text-faint);}
+  .menu{position:absolute;top:38px;left:0;background:var(--surface);border:1px solid var(--border);border-radius:10px;
+    padding:6px;min-width:230px;box-shadow:0 20px 50px rgba(0,0,0,.5);z-index:20;display:none;}
+  .menu.show{display:block;}
+  .menu .mi{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;font-size:12.5px;color:var(--text-dim);cursor:pointer;}
+  .menu .mi:hover{background:var(--surface-2);color:var(--text);} .menu .mi.on{color:var(--text);background:var(--surface-3);}
+  .menu .mi svg{width:15px;height:15px;} .menu .mi small{display:block;color:var(--text-faint);font-size:10.5px;font-weight:500;} .menu .mi .grow{flex:1;}
+  .capnote{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--text-faint);}
+  .capnote svg{width:13px;height:13px;color:var(--green);}
+  .live-ind{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:var(--red);}
+  .live-ind i{width:8px;height:8px;border-radius:50%;background:var(--red);animation:pulse 1.3s infinite;}
+  .paused-ind{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:var(--text-faint);}
+  .paused-ind i{width:8px;height:8px;border-radius:50%;background:var(--text-faint);}
+  .btn-sm{font-size:11.5px;font-weight:600;padding:6px 11px;border-radius:8px;cursor:pointer;border:1px solid var(--border);
+    background:var(--surface-2);color:var(--text-dim);display:flex;align-items:center;gap:6px;}
+  .btn-sm:hover{color:var(--text);border-color:#3b455a;} .btn-sm svg{width:13px;height:13px;}
+
+  .stage-view{flex:1;position:relative;display:grid;place-items:center;padding:22px;overflow:hidden;}
+  .screen-frame{width:100%;height:100%;border-radius:12px;overflow:hidden;position:relative;border:1px solid #1c2a36;
+    box-shadow:0 20px 60px rgba(0,0,0,.5);background:linear-gradient(135deg,#16283a,#0c1a26 60%,#0a151d);}
+  .chrome-menubar{height:26px;background:rgba(10,18,26,.9);display:flex;align-items:center;gap:16px;padding:0 14px;font-size:11px;color:#9fb3c4;}
+  .chrome-menubar .apple{font-size:13px;} .chrome-menubar b{color:#dbe7f0;}
+  .chrome-menubar .right{margin-left:auto;display:flex;gap:14px;color:#7f95a6;}
+
+  /* a realistic desktop with two overlapping windows -> "whatever is visible" */
+  .win{position:absolute;border-radius:10px;overflow:hidden;border:1px solid #22323f;box-shadow:0 16px 40px rgba(0,0,0,.45);background:#0c1218;display:flex;flex-direction:column;}
+  .win-bar{height:26px;display:flex;align-items:center;gap:7px;padding:0 10px;background:#0e1720;border-bottom:1px solid #17222c;font-size:10.5px;color:#8ea3b4;}
+  .win-bar .tl{display:flex;gap:5px;} .win-bar .tl i{width:8px;height:8px;border-radius:50%;} .tl .a{background:#ff5f57}.tl .b{background:#febc2e}.tl .c{background:#28c840}
+
+  /* browser window (dashboard) */
+  .w-browser{left:34px;top:56px;width:560px;bottom:52px;}
+  .saas{flex:1;background:#f4f6fb;color:#1f2734;display:flex;overflow:hidden;}
+  .saas-side{width:120px;background:#111827;color:#c3cbd9;padding:12px 0;font-size:11px;}
+  .saas-side .brand{font-weight:800;color:#fff;padding:0 14px 10px;font-size:12px;display:flex;align-items:center;gap:6px;}
+  .saas-side .brand .lg{width:14px;height:14px;border-radius:4px;background:linear-gradient(135deg,#7c6cff,#4c9dff);}
+  .saas-side .n{padding:6px 14px;display:flex;align-items:center;gap:8px;color:#9aa6bd;}
+  .saas-side .n.on{background:#1e293b;color:#fff;box-shadow:inset 2px 0 0 #7c6cff;} .saas-side .n b{width:11px;height:11px;border-radius:3px;background:currentColor;opacity:.6;}
+  .saas-main{flex:1;padding:12px 14px;overflow:hidden;}
+  .saas-top{display:flex;align-items:center;margin-bottom:10px;} .saas-top h4{font-size:13px;font-weight:800;color:#101828;}
+  .saas-top .rng{margin-left:auto;font-size:10px;color:#667085;background:#fff;border:1px solid #e4e7ec;border-radius:6px;padding:4px 8px;}
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;}
+  .kpi{background:#fff;border:1px solid #e4e7ec;border-radius:8px;padding:7px 9px;}
+  .kpi .lbl{font-size:9px;color:#667085;font-weight:600;text-transform:uppercase;letter-spacing:.4px;}
+  .kpi .val{font-size:15px;font-weight:800;color:#101828;margin-top:2px;}
+  .kpi .d{font-size:9.5px;font-weight:700;margin-top:1px;} .kpi .d.up{color:#12855a;} .kpi .d.down{color:#d92d20;}
+  .card{background:#fff;border:1px solid #e4e7ec;border-radius:9px;padding:10px 12px;}
+  .card h5{font-size:11px;font-weight:700;color:#101828;margin-bottom:9px;display:flex;align-items:center;}
+  .card h5 .tag{margin-left:auto;font-size:9px;color:#d92d20;font-weight:700;background:#fef3f2;padding:2px 6px;border-radius:20px;}
+  .chart{height:100px;display:flex;align-items:flex-end;gap:8px;padding-top:6px;}
+  .chart .bar{flex:1;border-radius:4px 4px 0 0;background:linear-gradient(#6aa5ff,#4c9dff);position:relative;}
+  .chart .bar.drop{background:linear-gradient(#ff8f94,#ff5b64);}
+  .chart .bar span{position:absolute;top:-15px;left:0;right:0;text-align:center;font-size:8.5px;color:#667085;font-weight:700;}
+  .chart .bar em{position:absolute;bottom:-15px;left:0;right:0;text-align:center;font-size:8.5px;color:#98a2b3;font-style:normal;}
+
+  /* chat window (Slack-like) */
+  .w-chat{right:30px;top:150px;width:300px;bottom:120px;}
+  .slack{flex:1;background:#f8f8fb;color:#1d1c1d;display:flex;flex-direction:column;overflow:hidden;}
+  .slack-head{padding:9px 12px;border-bottom:1px solid #e6e6ea;font-size:12px;font-weight:800;color:#1d1c1d;}
+  .slack-head span{color:#8a8a8f;font-weight:500;}
+  .slack-body{flex:1;padding:10px 12px;overflow:hidden;display:flex;flex-direction:column;gap:11px;}
+  .sm{display:flex;gap:8px;} .sm .av{width:26px;height:26px;border-radius:6px;flex:0 0 26px;}
+  .sm .av.p{background:linear-gradient(135deg,#f59e0b,#ef4444);} .sm .av.q{background:linear-gradient(135deg,#10b981,#059669);}
+  .sm .txt{font-size:11.5px;line-height:1.45;} .sm .who2{font-weight:800;color:#1d1c1d;font-size:11.5px;} .sm .who2 time{font-weight:500;color:#8a8a8f;font-size:9.5px;margin-left:6px;}
+  .sm .body2{color:#3a3a3c;margin-top:1px;}
+  .slack-in{margin:8px 12px 12px;border:1px solid #d9d9de;border-radius:8px;padding:8px 10px;font-size:11px;color:#9a9aa0;background:#fff;}
+
+  /* capture selection outline over the chosen source */
+  .sel-outline{position:absolute;border:2px solid var(--accent);border-radius:8px;box-shadow:0 0 0 3px rgba(124,108,255,.18);pointer-events:none;z-index:4;transition:.25s;}
+  .sel-label{position:absolute;top:-11px;left:10px;background:var(--accent);color:#fff;font-size:9.5px;font-weight:800;letter-spacing:.4px;padding:2px 7px;border-radius:5px;}
+  .dim{position:absolute;inset:0;background:rgba(4,6,11,.5);pointer-events:none;z-index:3;opacity:0;transition:.25s;}
+  .dim.show{opacity:1;}
+  .ai-point{position:absolute;border:2px solid var(--green);border-radius:6px;box-shadow:0 0 0 4px rgba(53,196,107,.16);
+    animation:point 2.4s ease-in-out infinite;pointer-events:none;z-index:6;display:none;}
+  @keyframes point{0%,100%{opacity:.35}50%{opacity:1}}
+
+  .capture-overlay{position:absolute;inset:22px;border-radius:12px;display:grid;place-items:center;background:rgba(4,6,11,.9);z-index:9;text-align:center;}
+  .capture-overlay .big{width:64px;height:64px;border-radius:16px;background:var(--surface-2);border:1px solid var(--border);display:grid;place-items:center;margin:0 auto 16px;}
+  .capture-overlay .big svg{width:30px;height:30px;color:var(--text-dim);}
+  .capture-overlay h2{font-size:16px;margin-bottom:6px;} .capture-overlay p{font-size:12.5px;color:var(--text-faint);max-width:360px;margin:0 auto 18px;line-height:1.6;}
+  .capture-overlay .go{font-size:13px;font-weight:600;padding:10px 20px;border-radius:10px;border:none;cursor:pointer;background:linear-gradient(var(--accent),var(--accent-2));color:#fff;box-shadow:0 6px 18px rgba(124,108,255,.3);}
+  .snap-flash{position:absolute;inset:22px;border-radius:12px;background:#fff;opacity:0;pointer-events:none;z-index:8;}
+  .snap-flash.go{animation:flash .5s ease;} @keyframes flash{0%{opacity:.55}100%{opacity:0}}
+  .snap-toast{position:absolute;bottom:34px;left:50%;transform:translateX(-50%);z-index:10;background:rgba(12,15,22,.94);
+    border:1px solid var(--border);border-radius:22px;padding:7px 14px;font-size:11.5px;color:var(--text-dim);display:flex;align-items:center;gap:8px;opacity:0;transition:.25s;}
+  .snap-toast.show{opacity:1;} .snap-toast .mini{width:26px;height:17px;border-radius:3px;background:linear-gradient(135deg,#1b2c3a,#12202b);border:1px solid var(--border);}
+
+  /* RIGHT rail */
+  .rail{width:340px;flex:0 0 340px;background:var(--surface);border-left:1px solid var(--border-soft);display:flex;flex-direction:column;min-height:0;}
+  .rail-head{height:46px;flex:0 0 46px;display:flex;align-items:center;gap:8px;padding:0 14px;border-bottom:1px solid var(--border-soft);}
+  .rail-head .title{font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px;} .rail-head .title svg{width:15px;height:15px;color:var(--accent);}
+  .rail-head .spacer{flex:1;}
+  .mini-btn{width:28px;height:28px;border-radius:7px;border:1px solid transparent;background:none;color:var(--text-faint);cursor:pointer;display:grid;place-items:center;}
+  .mini-btn:hover{background:var(--surface-2);color:var(--text);border-color:var(--border);} .mini-btn svg{width:15px;height:15px;}
+  .thread{flex:1;overflow-y:auto;padding:16px 14px 8px;display:flex;flex-direction:column;gap:14px;}
+  .msg{display:flex;flex-direction:column;gap:5px;max-width:100%;} .msg.user{align-items:flex-end;}
+  .who{font-size:10.5px;font-weight:700;color:var(--text-faint);letter-spacing:.3px;display:flex;gap:6px;align-items:center;}
+  .who .badge{font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:var(--surface-3);color:var(--text-faint);border:1px solid var(--border);}
+  .who .badge.grn{color:#8fe6b0;border-color:#1f5a3a;background:rgba(53,196,107,.12);}
+  .b-user{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;border-radius:12px 12px 4px 12px;padding:9px 12px;font-size:13px;line-height:1.5;max-width:88%;}
+  .b-ai{background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:12px 12px 12px 4px;padding:10px 12px;font-size:13px;line-height:1.6;max-width:94%;}
+  .b-ai p{margin-bottom:8px;} .b-ai p:last-child{margin-bottom:0;} .b-ai strong{color:#fff;}
+  .b-ai ul{margin:2px 0 8px 16px;} .b-ai li{margin-bottom:4px;}
+  code.inline{background:var(--surface-3);padding:1px 5px;border-radius:4px;font-family:var(--mono);font-size:11.5px;color:#c9d4ff;}
+  .frame-chip{display:inline-flex;align-items:center;gap:7px;font-size:10.5px;color:rgba(255,255,255,.85);background:rgba(255,255,255,.14);border-radius:6px;padding:3px 6px 3px 4px;margin-top:7px;}
+  .frame-chip .mini{width:26px;height:16px;border-radius:3px;background:linear-gradient(135deg,#1b2c3a,#12202b);}
+  .codeblock{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;margin:6px 0;overflow:hidden;}
+  .codeblock .cb-head{display:flex;justify-content:space-between;padding:5px 10px;border-bottom:1px solid var(--border-soft);font-size:10px;color:var(--text-faint);font-family:var(--mono);}
+  .codeblock .cb-head button{background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:10px;} .codeblock .cb-head button:hover{color:var(--text);}
+  .codeblock pre{padding:10px 12px;overflow-x:auto;} .codeblock code{font-family:var(--mono);font-size:11.5px;line-height:1.6;}
+  .cursor{display:inline-block;width:7px;height:13px;background:var(--accent);margin-left:1px;vertical-align:-2px;animation:blink 1s steps(2) infinite;border-radius:1px;}
+  @keyframes blink{50%{opacity:0}}
+  .composer{padding:12px;border-top:1px solid var(--border-soft);}
+  .frame-status{display:flex;align-items:center;gap:8px;font-size:11px;margin-bottom:9px;padding:6px 9px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-dim);}
+  .frame-status .mini{width:28px;height:18px;border-radius:3px;background:linear-gradient(135deg,#1b2c3a,#12202b);border:1px solid var(--border);}
+  .frame-status.off{color:var(--text-faint);} .frame-status .dot{width:6px;height:6px;border-radius:50%;background:var(--green);} .frame-status.off .dot{background:var(--text-faint);}
+  .suggest{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px;}
+  .suggest button{font-size:11px;color:var(--text-dim);background:var(--surface-2);border:1px solid var(--border);border-radius:16px;padding:5px 10px;cursor:pointer;}
+  .suggest button:hover{color:var(--text);border-color:#3b455a;}
+  .composer-box{background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:9px 11px;transition:.15s;}
+  .composer-box:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px rgba(124,108,255,.14);}
+  textarea{width:100%;background:none;border:none;outline:none;resize:none;color:var(--text);font-family:var(--font);font-size:13px;line-height:1.5;max-height:110px;}
+  textarea::placeholder{color:var(--text-faint);}
+  .comp-foot{display:flex;align-items:center;gap:8px;margin-top:8px;}
+  .comp-foot .hint{font-size:10.5px;color:var(--text-faint);} .comp-foot .hint kbd{font-family:var(--font);background:var(--surface-3);border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-size:10px;color:var(--text-dim);}
+  .comp-foot .spacer{flex:1;}
+  .send{width:32px;height:32px;border-radius:9px;border:none;cursor:pointer;display:grid;place-items:center;background:linear-gradient(var(--accent),var(--accent-2));color:#fff;box-shadow:0 4px 12px rgba(124,108,255,.3);transition:.15s;}
+  .send:hover{filter:brightness(1.1);} .send:disabled{opacity:.45;box-shadow:none;cursor:default;} .send svg{width:16px;height:16px;}
+  .thread::-webkit-scrollbar{width:8px;} .thread::-webkit-scrollbar-thumb{background:#232a37;border-radius:8px;border:2px solid transparent;background-clip:padding-box;}
+  .caption{position:fixed;bottom:10px;left:0;right:0;text-align:center;color:#5a6070;font-size:12px;}
+  .caption b{color:#8a90a0;}
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="traffic"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+    <div class="app-name">AI <b>Screen Copilot</b></div>
+    <div class="spacer"></div>
+    <div class="cap-pill" id="capPill" onclick="toggleCapture()"><span class="rec"></span><span id="capText">Share Screen</span></div>
+    <button class="ic-btn" title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+  </div>
+
+  <div class="body">
+    <!-- LEFT: the shared screen (~80%) -->
+    <section class="stage">
+      <div class="stage-bar">
+        <div class="picker" onclick="toggleMenu(event)">
+          <svg class="ic" id="srcIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          <span id="srcLabel">Entire screen</span>
+          <svg class="chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+          <div class="menu" id="menu">
+            <div class="mi on" onclick="setSource('screen',event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg><span class="grow">Entire screen<small>Everything visible is captured</small></span></div>
+            <div class="mi" onclick="setSource('window',event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg><span class="grow">A window<small>Just the front app window</small></span></div>
+            <div class="mi" onclick="setSource('region',event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/></svg><span class="grow">A region<small>Drag to select an area</small></span></div>
+          </div>
+        </div>
+        <div class="capnote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Whatever's visible here goes into context — no setup</div>
+        <div class="spacer"></div>
+        <div id="liveInd" class="paused-ind"><i></i> Not sharing</div>
+        <button class="btn-sm" onclick="toggleCapture()" id="pauseBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 9-14 9V3z"/></svg><span id="pauseTxt">Start sharing</span>
+        </button>
+      </div>
+
+      <div class="stage-view">
+        <div class="screen-frame">
+          <div class="chrome-menubar"><span class="apple"></span><b>Desktop</b><span>File</span><span>Edit</span><span>View</span><span class="right"><span>Wed 10:24</span><span>🔋</span><span>🔉</span></span></div>
+
+          <!-- Window 1: browser with a SaaS dashboard -->
+          <div class="win w-browser" id="winBrowser">
+            <div class="win-bar"><span class="tl"><i class="a"></i><i class="b"></i><i class="c"></i></span> app.metricly.io — Growth</div>
+            <div class="saas">
+              <div class="saas-side"><div class="brand"><span class="lg"></span>Metricly</div>
+                <div class="n on"><b></b>Overview</div><div class="n"><b></b>Funnel</div><div class="n"><b></b>Cohorts</div><div class="n"><b></b>Revenue</div></div>
+              <div class="saas-main">
+                <div class="saas-top"><h4>Growth overview</h4><span class="rng">Last 6 weeks ▾</span></div>
+                <div class="kpis">
+                  <div class="kpi"><div class="lbl">Signups</div><div class="val">1,248</div><div class="d down">▼ 18%</div></div>
+                  <div class="kpi"><div class="lbl">MRR</div><div class="val">$41.2k</div><div class="d up">▲ 5%</div></div>
+                  <div class="kpi"><div class="lbl">Churn</div><div class="val">4.1%</div><div class="d down">▲ 0.6%</div></div>
+                </div>
+                <div class="card"><h5>Weekly signups <span class="tag">▼ W4</span></h5>
+                  <div class="chart">
+                    <div class="bar" style="height:70%"><span>310</span><em>W1</em></div>
+                    <div class="bar" style="height:80%"><span>352</span><em>W2</em></div>
+                    <div class="bar" style="height:88%"><span>388</span><em>W3</em></div>
+                    <div class="bar drop" style="height:44%"><span>198</span><em>W4</em></div>
+                    <div class="bar" style="height:58%"><span>258</span><em>W5</em></div>
+                    <div class="bar" style="height:64%"><span>284</span><em>W6</em></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Window 2: a chat/Slack window -->
+          <div class="win w-chat" id="winChat">
+            <div class="win-bar"><span class="tl"><i class="a"></i><i class="b"></i><i class="c"></i></span> Slack — #growth</div>
+            <div class="slack">
+              <div class="slack-head"># growth <span>· 12 members</span></div>
+              <div class="slack-body">
+                <div class="sm"><div class="av p"></div><div><div class="who2">Priya <time>10:19</time></div><div class="txt body2">hey, signups look really low this week 👀 any idea what happened?</div></div></div>
+                <div class="sm"><div class="av q"></div><div><div class="who2">You <time>10:23</time></div><div class="txt body2">digging into it now…</div></div></div>
+              </div>
+              <div class="slack-in">Message #growth</div>
+            </div>
+          </div>
+
+          <!-- capture selection + AI highlight -->
+          <div class="dim" id="dim"></div>
+          <div class="sel-outline" id="sel" style="display:none;"><span class="sel-label" id="selLabel">CAPTURING</span></div>
+          <div class="ai-point" id="aiPoint"></div>
+        </div>
+
+        <div class="snap-flash" id="flash"></div>
+        <div class="snap-toast" id="toast"><span class="mini"></span><span id="toastTxt">Snapshot captured &amp; added to context</span></div>
+
+        <div class="capture-overlay" id="overlay">
+          <div>
+            <div class="big"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+            <h2>Share your screen to begin</h2>
+            <p>Whatever is visible — a dashboard, a chat, a page, code — is captured as one image and sent as context. No picking "content types."</p>
+            <button class="go" onclick="toggleCapture()">Start sharing</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT: chat rail -->
+    <aside class="rail">
+      <div class="rail-head">
+        <span class="title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Copilot</span>
+        <span class="spacer"></span>
+        <button class="mini-btn" title="History"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 3"/></svg></button>
+        <button class="mini-btn" title="New chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button>
+      </div>
+      <div class="thread" id="thread">
+        <div class="msg ai"><div class="who">Copilot <span class="badge">claude-sonnet-5</span></div>
+          <div class="b-ai"><p>Hi 👋 I read whatever's on your screen as-is. Right now I can see a dashboard and a Slack thread on the left — ask me anything about them.</p></div></div>
+      </div>
+      <div class="composer">
+        <div class="frame-status off" id="frameStatus"><span class="dot"></span><span id="frameTxt">Not sharing — start to attach a snapshot</span></div>
+        <div class="suggest">
+          <button onclick="ask('Why did signups drop this week?')">Why did signups drop this week?</button>
+          <button onclick="ask('Help me reply to Priya')">Help me reply to Priya</button>
+        </div>
+        <div class="composer-box">
+          <textarea id="input" rows="1" placeholder="Ask about anything on screen…" oninput="autogrow(this)" onkeydown="onKey(event)"></textarea>
+          <div class="comp-foot">
+            <span class="hint"><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline</span>
+            <span class="spacer"></span>
+            <button class="send" id="sendBtn" onclick="send()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div class="caption">Whatever is visible → context · source = <b>entire screen / a window / a region</b> (not a content type) · <b>Start sharing</b>, ask, press <b>↵</b></div>
+
+<script>
+  let capturing=false, streaming=false, source='screen';
+  const thread=document.getElementById('thread');
+  const sel=document.getElementById('sel'), dim=document.getElementById('dim');
+
+  const SOURCES={
+    screen:{label:'Entire screen', icon:'<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
+      rect:{left:'0',top:'0',right:'0',bottom:'0'}, dim:false, note:'Entire screen → context'},
+    window:{label:'A window', icon:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/>',
+      rect:{left:'30px',top:'52px',width:'560px',height:'auto',bottom:'48px'}, dim:true, note:'Front window → context'},
+    region:{label:'A region', icon:'<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/>',
+      rect:{left:'150px',top:'150px',width:'340px',height:'150px'}, dim:true, note:'Selected region → context'}
+  };
+
+  function applySelection(){
+    const s=SOURCES[source];
+    document.getElementById('srcLabel').textContent=s.label;
+    document.getElementById('srcIcon').innerHTML=s.icon;
+    document.getElementById('frameTxt').textContent = capturing ? s.note+' on send' : 'Not sharing — start to attach a snapshot';
+    if(!capturing){ sel.style.display='none'; dim.classList.remove('show'); return; }
+    // position the selection outline
+    const r=s.rect; sel.style.display='block';
+    ['left','top','right','bottom','width','height'].forEach(k=>{ sel.style[k]= r[k]!==undefined ? (r[k]==='auto'?'':r[k]) : ''; });
+    document.getElementById('selLabel').textContent = s.label.toUpperCase();
+    dim.classList.toggle('show', s.dim);
+  }
+  function setSource(name,e){ e.stopPropagation(); source=name; document.getElementById('menu').classList.remove('show');
+    document.querySelectorAll('.menu .mi').forEach(m=>m.classList.remove('on')); e.currentTarget.classList.add('on'); applySelection(); }
+  function toggleMenu(e){ e.stopPropagation(); document.getElementById('menu').classList.toggle('show'); }
+  document.addEventListener('click',()=>document.getElementById('menu').classList.remove('show'));
+
+  function toggleCapture(){
+    capturing=!capturing;
+    document.getElementById('overlay').style.display=capturing?'none':'grid';
+    document.getElementById('capPill').classList.toggle('live',capturing);
+    document.getElementById('capText').textContent=capturing?'Sharing — Pause':'Share Screen';
+    const li=document.getElementById('liveInd');
+    li.className=capturing?'live-ind':'paused-ind';
+    li.innerHTML=capturing?'<i></i> Sharing live':'<i></i> Not sharing';
+    document.getElementById('pauseTxt').textContent=capturing?'Pause':'Start sharing';
+    document.getElementById('frameStatus').className=capturing?'frame-status':'frame-status off';
+    applySelection();
+  }
+
+  function autogrow(t){t.style.height='auto';t.style.height=Math.min(t.scrollHeight,110)+'px';}
+  function onKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}
+  function scrollDown(){thread.scrollTop=thread.scrollHeight;}
+  function ask(q){ document.getElementById('input').value=q; send(); }
+
+  // answers are driven by what's *visible*, not a chosen category
+  function pickReply(text){
+    const t=text.toLowerCase();
+    if(t.includes('repl')||t.includes('priya')||t.includes('slack')) return {
+      point:{left:'calc(100% - 330px)',top:'176px',width:'300px',height:'150px'},
+      lines:[
+        "<p>I can see <strong>Priya's message</strong> in <code class='inline'>#growth</code> asking why signups look low — and the dashboard right next to it has the answer.</p>",
+        "<p>Here's a reply you can paste:</p>",
+        "<div class='codeblock'><div class='cb-head'><span>reply to #growth</span><button onclick=\"this.textContent='Copied ✓'\">Copy</button></div><pre><code>Signups dropped ~49% in W4 (388→198) — the\nrest of the funnel (MRR ↑5%, activation steady)\nlooks fine, so it's top-of-funnel. Checking\ntraffic sources for W4 now.</code></pre></div>",
+        "<p>Want me to tighten the tone or add the churn number?</p>"
+      ]
+    };
+    return {
+      point:{left:'46px',top:'250px',width:'520px',height:'150px'},
+      lines:[
+        "<p>From the <strong>Metricly</strong> window, the <strong>Weekly signups</strong> chart tells the story — <strong>W4 fell to 198</strong> from 388 (the red bar), ~49% down.</p>",
+        "<ul><li>The <strong>Signups</strong> KPI confirms it: <code class='inline'>▼ 18%</code> for the period.</li><li><strong>MRR ▲5%</strong> and churn barely moved — so this is a <strong>top-of-funnel</strong> issue, not product or retention.</li></ul>",
+        "<p>Likely culprits around W4: a campaign ending, a landing-page/pricing change, or broken tracking. Open <strong>Funnel</strong> and compare W3 vs W4 by source.</p>"
+      ]
+    };
+  }
+
+  function send(){
+    const inp=document.getElementById('input');
+    const text=inp.value.trim(); if(!text||streaming) return;
+    if(!capturing){ toggleCapture(); }
+
+    thread.insertAdjacentHTML('beforeend',
+      `<div class="msg user"><div class="who">You</div><div class="b-user">${text}<div class="frame-chip"><span class="mini"></span>snapshot · ${SOURCES[source].label.toLowerCase()}</div></div></div>`);
+    inp.value=''; autogrow(inp); scrollDown();
+
+    const flash=document.getElementById('flash'); flash.classList.remove('go'); void flash.offsetWidth; flash.classList.add('go');
+    const toast=document.getElementById('toast'); document.getElementById('toastTxt').textContent=SOURCES[source].note.replace('→ context','captured → added to context');
+    toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'),2200);
+
+    const ans=pickReply(text);
+    thread.insertAdjacentHTML('beforeend',
+      `<div class="msg ai"><div class="who">Copilot <span class="badge">claude-sonnet-5</span> <span class="badge grn">read your screen</span></div><div class="b-ai" id="stream"><span class="cursor"></span></div></div>`);
+    scrollDown();
+
+    const p=document.getElementById('aiPoint');
+    Object.assign(p.style,{display:'block',left:ans.point.left,top:ans.point.top,width:ans.point.width,height:ans.point.height,right:'',bottom:''});
+
+    streaming=true; document.getElementById('sendBtn').disabled=true;
+    const target=[...document.querySelectorAll('#stream')].pop();
+    let i=0;
+    (function next(){
+      if(i>=ans.lines.length){ target.querySelector('.cursor')?.remove(); streaming=false; document.getElementById('sendBtn').disabled=false; target.id=''; return; }
+      target.querySelector('.cursor').insertAdjacentHTML('beforebegin', ans.lines[i]); scrollDown(); i++;
+      setTimeout(next, 480+Math.random()*280);
+    })();
+  }
+</script>
+</body>
+</html>
